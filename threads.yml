@@ -1,0 +1,43 @@
+name: Post to Threads (manual test)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  threads:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install deps
+        run: pip install requests beautifulsoup4 lxml
+
+      - name: Post to Threads
+        env:
+          # Threads API — put a valid *User Access Token* with scopes like:
+          # threads_basic, threads_content_publish (see Meta docs)
+          THREADS_USER_ACCESS_TOKEN: ${{ secrets.THREADS_USER_ACCESS_TOKEN }}
+
+          # Optional posting behavior
+          THREADS_VISIBILITY: "everyone"
+          THREADS_TOPIC_TAG: ${{ secrets.THREADS_TOPIC_TAG }}         # optional
+          THREADS_AUTO_PUBLISH_TEXT: "false"                           # set "true" to auto-publish text-only
+
+          # Either use CONTENT_* to bypass Shopify...
+          # CONTENT_TITLE: "Sample product"
+          # CONTENT_DESC: "Short description"
+          # CONTENT_HANDLE: "my-handle"
+          # CONTENT_IMAGE_URL: "https://..."
+
+          # ...or let it pull from Shopify:
+          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+          SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
+          NUM_PRODUCTS_TO_FETCH: "100"
+          # PRODUCT_HANDLE: ${{ secrets.PRODUCT_HANDLE }}              # optional
+        run: python threads_post.py
