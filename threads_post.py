@@ -4,34 +4,38 @@ import random
 import html
 from bs4 import BeautifulSoup
 
-# ========= Config (env / GitHub Secrets) =========
+# ==============================
+# Config (env / GitHub Secrets)
+# ==============================
 
-# Required for Threads API (use a Threads *User Access Token* with scopes like threads_basic, threads_content_publish)
+# Threads — REQUIRED (long-lived **User Access Token** with threads_basic + threads_content_publish)
 THREADS_USER_ACCESS_TOKEN = os.getenv("THREADS_USER_ACCESS_TOKEN", "")
 
-# Optional post settings
+# Optional Threads behavior
 THREADS_VISIBILITY = os.getenv("THREADS_VISIBILITY", "everyone")  # everyone | profiles_you_follow | mentioned_only
-THREADS_TOPIC_TAG  = os.getenv("THREADS_TOPIC_TAG", "")           # e.g. "Shopify" (without the #)
+THREADS_TOPIC_TAG  = os.getenv("THREADS_TOPIC_TAG", "")           # e.g. "Shopify" (no #)
 THREADS_AUTO_PUBLISH_TEXT = os.getenv("THREADS_AUTO_PUBLISH_TEXT", "false").lower() == "true"
 
-# Content source — either CONTENT_* or Shopify
-CONTENT_TITLE      = os.getenv("CONTENT_TITLE")
-CONTENT_DESC       = os.getenv("CONTENT_DESC")
-CONTENT_HANDLE     = os.getenv("CONTENT_HANDLE")
-CONTENT_IMAGE_URL  = os.getenv("CONTENT_IMAGE_URL")
+# Content source — Either use CONTENT_* to bypass Shopify OR fetch from Shopify
+CONTENT_TITLE     = os.getenv("CONTENT_TITLE")
+CONTENT_DESC      = os.getenv("CONTENT_DESC")
+CONTENT_HANDLE    = os.getenv("CONTENT_HANDLE")
+CONTENT_IMAGE_URL = os.getenv("CONTENT_IMAGE_URL")
 
-SHOPIFY_STORE = os.getenv("SHOPIFY_STORE", "dr-xm.myshopify.com")
-SHOPIFY_TOKEN = os.getenv("SHOPIFY_TOKEN", "")
+SHOPIFY_STORE  = os.getenv("SHOPIFY_STORE", "dr-xm.myshopify.com")
+SHOPIFY_TOKEN  = os.getenv("SHOPIFY_TOKEN", "")
 NUM_PRODUCTS_TO_FETCH = int(os.getenv("NUM_PRODUCTS_TO_FETCH", "100"))
 PRODUCT_HANDLE = os.getenv("PRODUCT_HANDLE")  # optional: force a specific product
 
-CAPTION_LIMIT = int(os.getenv("CAPTION_LIMIT", "280"))  # Threads text limit is higher, but we keep it tidy
+CAPTION_LIMIT = int(os.getenv("CAPTION_LIMIT", "280"))  # keep tidy
 
-# ========= Helpers =========
+# ==============================
+# Helpers
+# ==============================
 
 def _require_threads():
     if not THREADS_USER_ACCESS_TOKEN:
-        raise SystemExit("❌ THREADS_USER_ACCESS_TOKEN is missing. See Meta Threads API docs to generate one.")
+        raise SystemExit("❌ THREADS_USER_ACCESS_TOKEN missing. Generate a long-lived Threads user token with scopes: threads_basic, threads_content_publish.")
 
 def _clean_html_to_text(html_content: str, max_chars: int = 3000) -> str:
     if not html_content:
@@ -43,14 +47,16 @@ def _build_text(title: str, desc: str, handle: str | None) -> str:
     title = html.unescape((title or "").strip())
     desc  = html.unescape((desc or "").strip())
     link  = f"https://mydrxm.com/products/{handle}" if handle else ""
-    base  = f"{title}\n\n{desc}".strip()
+    base  = f"{title}\n\n{desc}".strip() if desc else title
     if len(base) > CAPTION_LIMIT:
         base = base[:CAPTION_LIMIT-3].rstrip() + "..."
     if link:
         base += f"\n\n{link}"
     return base
 
-# ========= Shopify (optional) =========
+# ==============================
+# Shopify (optional)
+# ==============================
 
 def _shopify_headers() -> dict:
     if not SHOPIFY_TOKEN:
@@ -77,12 +83,13 @@ def shopify_fetch_random(store: str, limit: int = NUM_PRODUCTS_TO_FETCH) -> dict
         raise SystemExit("❌ Shopify returned no products.")
     return random.choice(products)
 
-# ========= Threads API calls =========
-# Official flow: 1) create media container 2) publish it
-# Endpoints documented by Meta’s Threads API (graph.threads.net).
+# ==============================
+# Threads API (containers → publish)
+# ==============================
 
-def threads_create_media_container_text(text: str) -> str:
-    # You can auto-publish text-only posts by passing auto_publish_text=true
+API_BASE = "https://graph.threads.net"
+
+def threads_create_container_text(text: str) -> str:
     params = {
         "text": text,
         "media_type": "TEXT",
@@ -93,16 +100,14 @@ def threads_create_media_container_text(text: str) -> str:
     if THREADS_AUTO_PUBLISH_TEXT:
         params["auto_publish_text"] = "true"
 
-    r = requests.post(
-        "https://graph.threads.net/me/threads",
-        params=params,
-        headers={"Authorization": f"Bearer {THREADS_USER_ACCESS_TOKEN}"},
-        timeout=60,
-    )
+    r = requests.post(f"{API_BASE}/me/threads",
+                      params=params,
+                      headers={"Authorization": f"Bearer {THREADS_USER_ACCESS_TOKEN}"},
+                      timeout=60)
     r.raise_for_status()
     return r.json()["id"]  # creation_id
 
-def threads_create_media_container_image(text: str, image_url: str, alt_text: str | None) -> str:
+def threads_create_container_image(text: str, image_url: str, alt_text: str | None) -> str:
     params = {
         "text": text,
         "media_type": "IMAGE",
@@ -114,26 +119,24 @@ def threads_create_media_container_image(text: str, image_url: str, alt_text: st
     if THREADS_TOPIC_TAG:
         params["topic_tag"] = THREADS_TOPIC_TAG
 
-    r = requests.post(
-        "https://graph.threads.net/me/threads",
-        params=params,
-        headers={"Authorization": f"Bearer {THREADS_USER_ACCESS_TOKEN}"},
-        timeout=90,
-    )
+    r = requests.post(f"{API_BASE}/me/threads",
+                      params=params,
+                      headers={"Authorization": f"Bearer {THREADS_USER_ACCESS_TOKEN}"},
+                      timeout=90)
     r.raise_for_status()
     return r.json()["id"]  # creation_id
 
-def threads_publish(creation_id: string) -> str:
-    r = requests.post(
-        "https://graph.threads.net/me/threads_publish",
-        params={"creation_id": creation_id},
-        headers={"Authorization": f"Bearer {THREADS_USER_ACCESS_TOKEN}"},
-        timeout=60,
-    )
+def threads_publish(creation_id: str) -> str:
+    r = requests.post(f"{API_BASE}/me/threads_publish",
+                      params={"creation_id": creation_id},
+                      headers={"Authorization": f"Bearer {THREADS_USER_ACCESS_TOKEN}"},
+                      timeout=60)
     r.raise_for_status()
-    return r.json()["id"]  # the post id
+    return r.json()["id"]  # post id
 
-# ========= Main =========
+# ==============================
+# Main
+# ==============================
 
 if __name__ == "__main__":
     try:
@@ -163,19 +166,22 @@ if __name__ == "__main__":
             image_url = imgs[0]["src"] if imgs else None
             print(f"✅ Selected: {title} (handle={handle})")
 
-        # Build text
         text = _build_text(title, desc, handle)
 
         # Create container + publish
         if image_url:
             print("🔹 Creating IMAGE container…")
-            creation_id = threads_create_media_container_image(text, image_url, alt_text=title)
+            creation_id = threads_create_container_image(text, image_url, alt_text=title)
+            if not creation_id:
+                raise SystemExit("❌ Failed to create image container.")
             print("🔹 Publishing…")
             post_id = threads_publish(creation_id)
             print(f"✅ Threads image post published: {post_id}")
         else:
             print("🔹 Creating TEXT container…")
-            creation_id = threads_create_media_container_text(text)
+            creation_id = threads_create_container_text(text)
+            if not creation_id:
+                raise SystemExit("❌ Failed to create text container.")
             if THREADS_AUTO_PUBLISH_TEXT:
                 print("✅ Threads text post auto-published")
             else:
